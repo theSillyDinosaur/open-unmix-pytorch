@@ -2,6 +2,7 @@
 
 data/
 OSU/
+Dataset
 .mypy_cache
 .vscode
 *.json

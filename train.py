@@ -12,6 +12,7 @@ import os
 import copy
 import torchaudio
 
+import openunmix
 from openunmix import data
 from openunmix import model
 from openunmix import utils
@@ -98,8 +99,9 @@ def main():
     parser.add_argument(
         "--dataset",
         type=str,
-        default="musdb",
+        default="musdb_spec",
         choices=[
+            "musdb_spec",
             "musdb",
             "aligned",
             "sourcefolder",
@@ -182,7 +184,7 @@ def main():
         help="set number of channels for model (1, 2)",
     )
     parser.add_argument(
-        "--nb-workers", type=int, default=0, help="Number of workers for dataloader."
+        "--nb-workers", type=int, default=1, help="Number of workers for dataloader."
     )
     parser.add_argument(
         "--debug",
@@ -199,25 +201,28 @@ def main():
         help="less verbose during training",
     )
     parser.add_argument(
-        "--no-cuda", action="store_true", default=False, help="disables CUDA training"
+        "--no-gpu", action="store_true", default=False, help="disables GPU training"
     )
 
     args, _ = parser.parse_known_args()
 
     torchaudio.set_audio_backend(args.audio_backend)
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-    print("Using GPU:", use_cuda)
-    dataloader_kwargs = {"num_workers": args.nb_workers, "pin_memory": True} if use_cuda else {}
-
+    use_cuda = not args.no_gpu and torch.cuda.is_available()
+    use_mps = not args.no_gpu and torch.backends.mps.is_available()
+    dataloader_kwargs = {"num_workers": args.nb_workers, "pin_memory": True} if use_cuda or use_mps else {}
+    # Git related?
+    '''
     repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     repo = Repo(repo_dir)
     commit = repo.head.commit.hexsha[:7]
+    '''
 
     # use jpg or npy
     torch.manual_seed(args.seed)
     random.seed(args.seed)
 
-    device = torch.device("cuda" if use_cuda else "cpu")
+    device = torch.device("cuda" if use_cuda else ("mps" if use_mps else "cpu"))
+    print(f"Log: Now running on {device}")
 
     train_dataset, valid_dataset, args = data.load_datasets(parser, args)
 
@@ -233,7 +238,15 @@ def main():
     stft, _ = transforms.make_filterbanks(
         n_fft=args.nfft, n_hop=args.nhop, sample_rate=train_dataset.sample_rate
     )
-    encoder = torch.nn.Sequential(stft, model.ComplexNorm(mono=args.nb_channels == 1)).to(device)
+    if args.dataset == "musdb_spec":
+        class Pseudo(torch.nn.Module):
+            def __init__(self):
+                super(Pseudo, self).__init__()
+            def forward(self, a):
+                return a
+        encoder = Pseudo()
+    else:
+        encoder = torch.nn.Sequential(stft, model.ComplexNorm(mono=args.nb_channels == 1)).to(device)
 
     separator_conf = {
         "nfft": args.nfft,
@@ -352,7 +365,7 @@ def main():
             "valid_loss_history": valid_losses,
             "train_time_history": train_times,
             "num_bad_epochs": es.num_bad_epochs,
-            "commit": commit,
+            # "commit": commit,
         }
 
         with open(Path(target_path, args.target + ".json"), "w") as outfile:

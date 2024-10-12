@@ -98,7 +98,6 @@ class TorchSTFT(nn.Module):
         """
 
         shape = x.size()
-        nb_samples, nb_channels, nb_timesteps = shape
 
         # pack batch
         x = x.view(-1, shape[-1])

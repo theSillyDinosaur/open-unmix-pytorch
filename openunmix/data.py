@@ -7,6 +7,8 @@ import torch
 import torch.utils.data
 import torchaudio
 import tqdm
+import os
+from .wav_toSpec import *
 
 
 def load_info(path: str) -> dict:
@@ -154,6 +156,7 @@ def load_datasets(
     Returns:
         train_dataset, validation_dataset
     """
+    print(parser, args)
     if args.dataset == "aligned":
         parser.add_argument("--input-file", type=str)
         parser.add_argument("--output-file", type=str)
@@ -279,7 +282,7 @@ def load_datasets(
         )
         valid_dataset = VariableSourcesTrackFolderDataset(split="valid", seq_duration=None, **dataset_kwargs)
 
-    else:
+    elif args.dataset == "musdb":
         parser.add_argument(
             "--is-wav",
             action="store_true",
@@ -311,6 +314,60 @@ def load_datasets(
         )
 
         valid_dataset = MUSDBDataset(split="valid", samples_per_track=1, seq_duration=None, **dataset_kwargs)
+    
+    elif args.dataset == "musdb_spec":
+        spec_root = "Dataset"
+        parser.add_argument("--samples-per-track", type=int, default=64)
+        parser.add_argument("--source-augmentations", type=str, default=["gain", "channelswap"], nargs="+")
+        args = parser.parse_args()
+        
+        dataset_kwargs = {
+            "root": spec_root,
+            "subsets": "train",
+            "target": args.target,
+            "seed": args.seed,
+        }
+
+        source_augmentations = aug_from_str(args.source_augmentations)
+
+        device = torch.device("cuda") if torch.cuda.is_available() else (
+            torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+        )
+
+        toSpec_kwargs = {
+            "device": device, 
+            "in_root": args.root, 
+            "out_root": spec_root,
+            "nfft": args.nfft, 
+            "nhop": args.nhop
+        }
+
+        if os.path.isdir(os.path.join(spec_root, "train")) == False:
+            wav_toSpec(subsets="train",
+                       split="train", 
+                       **toSpec_kwargs
+                       )
+
+        train_dataset = MUSDBSpecDataset(
+            split="train",
+            samples_per_track=args.samples_per_track,
+            seq_duration=args.seq_dur,
+            source_augmentations=source_augmentations,
+            random_track_mix=True,
+            **dataset_kwargs,
+        )
+
+        if os.path.isdir(os.path.join(spec_root, "valid")) == False:
+            wav_toSpec(subsets="train",
+                       split="valid", 
+                       **toSpec_kwargs
+                       )
+
+        valid_dataset = MUSDBSpecDataset(split="valid", samples_per_track=1, seq_duration=None, **dataset_kwargs)
+    
+    else:
+        raise NotImplementedError
+
 
     return train_dataset, valid_dataset, args
 
@@ -884,6 +941,88 @@ class MUSDBDataset(UnmixDataset):
     def __len__(self):
         return len(self.mus.tracks) * self.samples_per_track
 
+class MUSDBSpecDataset(UnmixDataset):
+    def __init__(
+        self,
+        target: str = "vocals",
+        root: str = None,
+        subsets: str = "train",
+        split: str = "train",
+        seq_duration: Optional[float] = 6.0,
+        samples_per_track: int = 64,
+        source_augmentations: Optional[Callable] = lambda audio: audio,
+        random_track_mix: bool = False,
+        seed: int = 42,
+        encoder: Optional[Callable] = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        self.seed = seed
+        random.seed(seed)
+        self.seq_duration = seq_duration
+        self.target = target
+        self.subsets = subsets
+        self.split = split
+        self.samples_per_track = samples_per_track
+        self.source_augmentations = source_augmentations
+        self.random_track_mix = random_track_mix
+        self.dir = os.path.join(root, split)
+        self.tracks = list(filter(lambda a: a[0] != ".", os.listdir(self.dir)))
+        self.sample_rate = 44100.0  # musdb is fixed sample rate
+
+    def __getitem__(self, index):
+        audio_sources = []
+        target_ind = None
+
+        # select track
+        track = self.tracks[index // self.samples_per_track]
+
+        # at training time we assemble a custom mix
+        if self.split == "train" and self.seq_duration:
+            for k, source in enumerate(["vocals", "drums", "bass", "other"]):
+                # memorize index of target source
+                if source == self.target:
+                    target_ind = k
+
+                # select a random track
+                if self.random_track_mix:
+                    track = random.choice(self.tracks)
+                
+                track_dir = os.path.join(self.dir, track)
+
+                # load source spec
+                spec = torch.load(os.path.join(track_dir, source+".pt"), weights_only=True)
+                # set random position
+                start = random.randint(0, spec.shape[2] - int(self.seq_duration*43))
+                spec = spec[:, :, start : start+int(self.seq_duration*43)]
+                # load source audio and apply time domain source_augmentations
+                spec = self.source_augmentations(spec)
+                audio_sources.append(spec)
+
+            # create stem tensor of shape (source, channel, samples)
+            stems = torch.stack(audio_sources, dim=0)
+            # # apply linear mix over source index=0
+            x = stems.sum(0)
+            # get the target stem
+            if target_ind is not None:
+                y = stems[target_ind]
+            # assuming vocal/accompaniment scenario if target!=source
+            else:
+                # apply time domain subtraction
+                y = x - stems[0]
+
+        # for validation and test, we deterministically yield the full
+        # pre-mixed musdb track
+        else:
+            # get the non-linear source mix straight from musdb
+            track_dir = os.path.join(self.dir, track)
+            x = torch.load(os.path.join(track_dir, "mixture.pt"), weights_only=True)
+            y = torch.load(os.path.join(track_dir, self.target+".pt"), weights_only=True)
+
+        return x, y
+
+    def __len__(self):
+        return len(self.tracks) * self.samples_per_track
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Open Unmix Trainer")
