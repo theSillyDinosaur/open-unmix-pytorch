@@ -326,6 +326,7 @@ def load_datasets(
             "subsets": "train",
             "target": args.target,
             "seed": args.seed,
+            "log": args.log
         }
 
         source_augmentations = aug_from_str(args.source_augmentations)
@@ -950,10 +951,11 @@ class MUSDBSpecDataset(UnmixDataset):
         split: str = "train",
         seq_duration: Optional[float] = 6.0,
         samples_per_track: int = 64,
-        source_augmentations: Optional[Callable] = lambda audio: audio,
+        source_augmentations: Optional[Callable] = None,
         random_track_mix: bool = False,
         seed: int = 42,
         encoder: Optional[Callable] = None,
+        log: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -969,6 +971,7 @@ class MUSDBSpecDataset(UnmixDataset):
         self.dir = os.path.join(root, split)
         self.tracks = list(filter(lambda a: a[0] != ".", os.listdir(self.dir)))
         self.sample_rate = 44100.0  # musdb is fixed sample rate
+        self.log = log
 
     def __getitem__(self, index):
         audio_sources = []
@@ -996,7 +999,8 @@ class MUSDBSpecDataset(UnmixDataset):
                 start = random.randint(0, spec.shape[2] - int(self.seq_duration*43))
                 spec = spec[:, :, start : start+int(self.seq_duration*43)]
                 # load source audio and apply time domain source_augmentations
-                spec = self.source_augmentations(spec)
+                if self.source_augmentations != None:
+                    spec = self.source_augmentations(spec)
                 audio_sources.append(spec)
 
             # create stem tensor of shape (source, channel, samples)
@@ -1018,6 +1022,9 @@ class MUSDBSpecDataset(UnmixDataset):
             track_dir = os.path.join(self.dir, track)
             x = torch.load(os.path.join(track_dir, "mixture.pt"), weights_only=True)
             y = torch.load(os.path.join(track_dir, self.target+".pt"), weights_only=True)
+        if self.log == True:
+            x = torch.clamp(torch.log(x), min=-50)
+            y = torch.clamp(torch.log(y), min=-50)
 
         return x, y
 

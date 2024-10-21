@@ -155,6 +155,11 @@ def main():
 
     # Model Parameters
     parser.add_argument(
+        "--log",
+        action="store_true",
+        help="whether to use log scale"
+    )
+    parser.add_argument(
         "--seq-dur",
         type=float,
         default=6.0,
