@@ -33,7 +33,7 @@ def wav_toSpec(
                 root=in_root,
                 is_wav=True,
                 subsets=subsets,
-                split=split,
+                split=None if split == "test" else split,
                 download=False,
             )
 
@@ -53,7 +53,6 @@ def wav_toSpec(
                 audio = track.audio.T if src_key == "mixture" else track.sources[src_key].audio.T
                 audio = torch.tensor(audio, dtype=torch.float16).to(device)
                 spec = encoder(audio).to(torch.device("cpu"))
-                print(spec.shape)
                 torch.save(spec, out_name)
         
 if __name__ == "__main__":

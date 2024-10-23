@@ -319,11 +319,11 @@ def load_datasets(
         spec_root = "Dataset"
         parser.add_argument("--samples-per-track", type=int, default=64)
         parser.add_argument("--source-augmentations", type=str, default=["gain", "channelswap"], nargs="+")
-        args = parser.parse_args()
         
+        args = parser.parse_args()
         dataset_kwargs = {
             "root": spec_root,
-            "subsets": "train",
+            "subsets": args.subsets,
             "target": args.target,
             "seed": args.seed,
             "log": args.log
@@ -343,28 +343,39 @@ def load_datasets(
             "nhop": args.nhop
         }
 
-        if os.path.isdir(os.path.join(spec_root, "train")) == False:
-            wav_toSpec(subsets="train",
-                       split="train", 
-                       **toSpec_kwargs
-                       )
+        if args.subsets == "train":
+            if os.path.isdir(os.path.join(spec_root, "train")) == False:
+                wav_toSpec(subsets="train",
+                        split="train", 
+                        **toSpec_kwargs
+                        )
 
-        train_dataset = MUSDBSpecDataset(
-            split="train",
-            samples_per_track=args.samples_per_track,
-            seq_duration=args.seq_dur,
-            source_augmentations=source_augmentations,
-            random_track_mix=True,
-            **dataset_kwargs,
-        )
+            train_dataset = MUSDBSpecDataset(
+                split="train",
+                samples_per_track=args.samples_per_track,
+                seq_duration=args.seq_dur,
+                source_augmentations=source_augmentations,
+                random_track_mix=True,
+                **dataset_kwargs,
+            )
 
-        if os.path.isdir(os.path.join(spec_root, "valid")) == False:
-            wav_toSpec(subsets="train",
-                       split="valid", 
-                       **toSpec_kwargs
-                       )
+            if os.path.isdir(os.path.join(spec_root, "valid")) == False:
+                wav_toSpec(subsets="train",
+                        split="valid", 
+                        **toSpec_kwargs
+                        )
 
-        valid_dataset = MUSDBSpecDataset(split="valid", samples_per_track=1, seq_duration=None, **dataset_kwargs)
+            valid_dataset = MUSDBSpecDataset(split="valid", samples_per_track=1, seq_duration=None, **dataset_kwargs)
+            return train_dataset, valid_dataset, args
+        else:
+            if os.path.isdir(os.path.join(spec_root, "test")) == False:
+                wav_toSpec(subsets="test",
+                        split="test", 
+                        **toSpec_kwargs
+                        )
+
+            test_dataset = MUSDBSpecDataset(split="test", samples_per_track=1, seq_duration=None, **dataset_kwargs)
+            return test_dataset, args
     
     else:
         raise NotImplementedError

@@ -110,6 +110,7 @@ def main():
         ],
         help="Name of the dataset.",
     )
+    parser.add_argument("--subsets", type=str, default="train", help="MUSDB subset (`train`/`test`)")
     parser.add_argument("--root", type=str, help="root path of dataset")
     parser.add_argument(
         "--output",

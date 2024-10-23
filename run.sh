@@ -1,1 +1,2 @@
-python3 train.py --root ../musdb18hq --output ../5e-6/ckpt_25 --epochs 25 --lr=5e-6 --log
+python3 train.py --root ../musdb18hq --output ../2048_hop/ckpt_25 --epochs 25 --nhop 2048
+python3 train.py --root ../musdb18hq --output ../2048_hop/ckpt_50 --epochs 50 --nhop 2048 --root ../2048_hop/ckpt_25
